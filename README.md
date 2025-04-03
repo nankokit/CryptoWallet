@@ -1,4 +1,5 @@
 # CryptoWallet
 - подключение к тестовой сети Sepolia
-- Infura API 
+- Infura API для ноды
 - Etherscan для истории транзакций
+- AES encryptor 
