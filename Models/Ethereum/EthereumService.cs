@@ -14,25 +14,56 @@ namespace CryptoWallet.Models.Ethereum
     {
         private readonly Web3 _web3;
         private readonly string _privateKey;
-        private readonly string _rpcUrl = "https://sepolia.infura.io/v3/80529fb326034dd480fb7fd24115e822"; 
-        private readonly string _etherscanApiKey = "NGZYT44U5QVWEHUX34JJQAFSTMUB75XARW"; 
+        private readonly string _rpcUrl = "https://sepolia.infura.io/v3/80529fb326034dd480fb7fd24115e822";
+        private readonly string _etherscanApiKey = "NGZYT44U5QVWEHUX34JJQAFSTMUB75XARW";
         private readonly HttpClient _httpClient;
+
 
         public string CurrencyName => "Ethereum";
 
         public EthereumService(string privateKey)
         {
-            _privateKey = privateKey;
-            var account = new Account(_privateKey);
-            _web3 = new Web3(account, _rpcUrl);
-            _httpClient = new HttpClient();
-            _httpClient.BaseAddress = new Uri("https://api-sepolia.etherscan.io/");
+            try
+            {
+                _privateKey = privateKey;
+                Console.WriteLine($"Initializing with private key: {privateKey.Substring(0, 4)}..."); 
+                var account = new Account(_privateKey);
+                _web3 = new Web3(account, _rpcUrl);
+                _httpClient = new HttpClient();
+                _httpClient.BaseAddress = new Uri("https://api-sepolia.etherscan.io/");
+                TestConnection().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing EthereumService: {ex.Message}");
+                throw;
+            }
         }
-
+        private async Task TestConnection()
+        {
+            try
+            {
+                var blockNumber = await _web3.Eth.Blocks.GetBlockNumber.SendRequestAsync();
+                Console.WriteLine($"Connected to Infura. Latest block: {blockNumber}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Infura connection failed: {ex.Message}");
+            }
+        }
         public async Task<decimal> GetBalanceAsync(string address)
         {
-            var balance = await _web3.Eth.GetBalance.SendRequestAsync(address);
-            return Web3.Convert.FromWei(balance.Value);
+            try
+            {
+                Console.WriteLine($"Checking balance for address: {address}");
+                var balance = await _web3.Eth.GetBalance.SendRequestAsync(address);
+                return Web3.Convert.FromWei(balance.Value);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching balance: {ex.Message}");
+                return 0m;
+            }
         }
 
         public async Task<string> SendAsync(string toAddress, decimal amount)
@@ -49,7 +80,7 @@ namespace CryptoWallet.Models.Ethereum
 
             if (response == null || response.Status != "1")
             {
-                return new List<Transaction>(); 
+                return new List<Transaction>();
             }
 
             var transactions = new List<Transaction>();
@@ -81,6 +112,6 @@ namespace CryptoWallet.Models.Ethereum
         public string Hash { get; set; }
         public string From { get; set; }
         public string To { get; set; }
-        public string Value { get; set; } 
+        public string Value { get; set; }
     }
 }

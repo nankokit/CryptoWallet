@@ -5,55 +5,45 @@ using CryptoWallet.Models.Bitcoin;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Text.Json;
+using System.IO;
 
 namespace CryptoWallet
 {
     public class ConsoleApp
     {
+        private const string WalletFilePath = "wallets.json";
+
         public static async Task Main(string[] args)
         {
-            var wallets = new List<Wallet>();
+            List<Wallet> wallets;
 
-            bool addingWallets = true;
-            while (addingWallets)
+            Console.Write("Enter password to unlock saved wallets: ");
+            string password = Console.ReadLine();
+
+            if (File.Exists(WalletFilePath))
             {
-                Console.WriteLine("\nAdd a new wallet:");
-                Console.WriteLine("1. Add Ethereum Wallet");
-                Console.WriteLine("2. Add Bitcoin Wallet");
-                Console.WriteLine("3. Finish adding wallets");
-                Console.Write("Select an option: ");
-
-                var choice = Console.ReadLine();
-
-                switch (choice)
+                wallets = LoadWallets(password);
+                if (wallets == null)
                 {
-                    case "1":
-                        wallets.Add(CreateEthereumWallet());
-                        break;
-                    case "2":
-                        wallets.Add(CreateBitcoinWallet());
-                        break;
-                    case "3":
-                        addingWallets = false;
-                        break;
-                    default:
-                        Console.WriteLine("Invalid option.");
-                        break;
+                    Console.WriteLine("Failed to unlock wallets. Exiting...");
+                    return;
                 }
+                Console.WriteLine("Wallets loaded successfully.");
             }
-
-            if (wallets.Count == 0)
+            else
             {
-                Console.WriteLine("No wallets added. Exiting...");
-                return;
+                wallets = new List<Wallet>();
+                Console.WriteLine("No wallet file found. Starting with an empty wallet list.");
             }
 
             bool running = true;
             while (running)
             {
                 Console.WriteLine("\nMulti-Currency Crypto Wallet");
-                Console.WriteLine("1. Select Wallet");
-                Console.WriteLine("2. Exit");
+                Console.WriteLine("1. Add Wallet");
+                Console.WriteLine("2. Select Wallet");
+                Console.WriteLine("3. Save and Exit");
                 Console.Write("Select an option: ");
 
                 var choice = Console.ReadLine();
@@ -61,9 +51,13 @@ namespace CryptoWallet
                 switch (choice)
                 {
                     case "1":
-                        await SelectWallet(wallets);
+                        AddWallet(wallets);
                         break;
                     case "2":
+                        await SelectWallet(wallets);
+                        break;
+                    case "3":
+                        SaveWallets(wallets, password);
                         running = false;
                         break;
                     default:
@@ -73,11 +67,39 @@ namespace CryptoWallet
             }
         }
 
+        private static void AddWallet(List<Wallet> wallets)
+        {
+            Console.WriteLine("\nAdd a new wallet:");
+            Console.WriteLine("1. Add Ethereum Wallet");
+            Console.WriteLine("2. Add Bitcoin Wallet");
+            Console.Write("Select an option: ");
+
+            var choice = Console.ReadLine();
+
+            switch (choice)
+            {
+                case "1":
+                    wallets.Add(CreateEthereumWallet());
+                    break;
+                case "2":
+                    wallets.Add(CreateBitcoinWallet());
+                    break;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+        }
+
         private static Wallet CreateEthereumWallet()
         {
-            Console.Write("Enter Ethereum address (e.g., 0x51B5bb...): ");
+            Console.Write("Enter Ethereum address (e.g., 0x15H7dd...): ");
             var address = Console.ReadLine();
-            Console.Write("Enter Ethereum private key (e.g., f36609...): ");
+            if (!address.StartsWith("0x") || address.Length != 42)
+            {
+                Console.WriteLine("Invalid Ethereum address format.");
+                return null;
+            }
+            Console.Write("Enter Ethereum private key (e.g., h25589...): ");
             var privateKey = Console.ReadLine();
 
             return new Wallet
@@ -159,7 +181,7 @@ namespace CryptoWallet
 
                     case "3":
                         var history = await wallet.Service.GetTransactionHistoryAsync(wallet.Address);
-                        Console.WriteLine("Transaction History:");
+                        Console.WriteLine("\nTransaction History:");
                         if (history.Count == 0)
                         {
                             Console.WriteLine("No transactions found.");
@@ -187,5 +209,58 @@ namespace CryptoWallet
                 }
             }
         }
+
+        private static void SaveWallets(List<Wallet> wallets, string password)
+        {
+            var walletData = new List<EncryptedWalletData>();
+            foreach (var wallet in wallets)
+            {
+                walletData.Add(new EncryptedWalletData
+                {
+                    Address = wallet.Address,
+                    EncryptedPrivateKey = Encryptor.Encrypt(wallet.PrivateKey, password),
+                    CurrencyName = wallet.Service.CurrencyName
+                });
+            }
+
+            string json = JsonSerializer.Serialize(walletData);
+            File.WriteAllText(WalletFilePath, json);
+            Console.WriteLine("Wallets saved successfully.");
+        }
+
+        private static List<Wallet> LoadWallets(string password)
+        {
+            try
+            {
+                string json = File.ReadAllText(WalletFilePath);
+                var walletData = JsonSerializer.Deserialize<List<EncryptedWalletData>>(json);
+                var wallets = new List<Wallet>();
+
+                foreach (var data in walletData)
+                {
+                    string privateKey = Encryptor.Decrypt(data.EncryptedPrivateKey, password);
+                    wallets.Add(new Wallet
+                    {
+                        Address = data.Address,
+                        PrivateKey = privateKey,
+                        Service = data.CurrencyName == "Ethereum" ? new EthereumService(privateKey) : new BitcoinService()
+                    });
+                }
+
+                return wallets;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading wallets: {ex.Message}");
+                return null;
+            }
+        }
+    }
+
+    public class EncryptedWalletData
+    {
+        public string Address { get; set; }
+        public string EncryptedPrivateKey { get; set; }
+        public string CurrencyName { get; set; }
     }
 }

@@ -7,6 +7,6 @@
 
   <ItemGroup>
     <PackageReference Include="Nethereum.Web3" Version="4.20.0" />
-    <PackageReference Include="System.Net.Http.Json" Version="9.0.0-preview.3.24172.9" /> <!-- Для работы с JSON -->
+    <PackageReference Include="System.Net.Http.Json" Version="9.0.0-preview.3.24172.9" />
   </ItemGroup>
 </Project>
