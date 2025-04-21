@@ -46,7 +46,7 @@ namespace CryptoWallet.Models.Ethereum
                 _web3 = new Web3(account, client); 
 
 
-                _httpClient = httpClient;
+                _httpClient = new HttpClient(new LoggingHttpMessageHandler(new HttpClientHandler()));
                 _httpClient.BaseAddress = new Uri("https://api-sepolia.etherscan.io/");
 
                 TestConnection().GetAwaiter().GetResult();
