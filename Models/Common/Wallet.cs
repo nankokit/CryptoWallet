@@ -4,6 +4,7 @@ namespace CryptoWallet.Models.Common
     {
         public string Address { get; set; }
         public string PrivateKey { get; set; }
+        public string ContractAddress { get; set; }
         public ICryptoService Service { get; set; }
     }
 }

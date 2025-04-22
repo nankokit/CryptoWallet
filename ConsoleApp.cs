@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Text.Json;
 using System.IO;
+using CryptoWallet.Models.ERC20;
+using Org.BouncyCastle.Bcpg;
 
 namespace CryptoWallet
 {
@@ -71,7 +73,8 @@ namespace CryptoWallet
         {
             Console.WriteLine("\nAdd a new wallet:");
             Console.WriteLine("1. Add Ethereum Wallet");
-            Console.WriteLine("2. Add Bitcoin Wallet");
+            Console.WriteLine("2. Add ERC-20 Token Wallet");
+            Console.WriteLine("3. Add Bitcoin Wallet");
             Console.Write("Select an option: ");
 
             var choice = Console.ReadLine();
@@ -79,9 +82,12 @@ namespace CryptoWallet
             switch (choice)
             {
                 case "1":
-                    wallets.Add(CreateEthereumWallet());
+                    wallets.Add(CreateWallet("Ethereum"));
                     break;
                 case "2":
+                    wallets.Add(CreateWallet("ERC20"));
+                    break;
+                case "3":
                     wallets.Add(CreateBitcoinWallet());
                     break;
                 default:
@@ -90,24 +96,59 @@ namespace CryptoWallet
             }
         }
 
-        private static Wallet CreateEthereumWallet()
+        private static Wallet CreateWallet(string type)
         {
-            Console.Write("Enter Ethereum address (e.g., 0x15H7dd...): ");
+            Console.Write("Enter address (e.g., 0x15H7dd...): ");
             var address = Console.ReadLine();
             if (!address.StartsWith("0x") || address.Length != 42)
             {
                 Console.WriteLine("Invalid Ethereum address format.");
                 return null;
             }
-            Console.Write("Enter Ethereum private key (e.g., h25589...): ");
+            Console.Write("Enter private key (e.g., h25589...): ");
             var privateKey = Console.ReadLine();
 
-            return new Wallet
+            if (type == "ERC20")
             {
-                Address = address,
-                PrivateKey = privateKey,
-                Service = new EthereumService(privateKey)
-            };
+                Console.Write("Enter ERC-20 token contract address (e.g., 0x...): ");
+                var contractAddress = Console.ReadLine();
+                if (!contractAddress.StartsWith("0x") || contractAddress.Length != 42)
+                {
+                    Console.WriteLine("Invalid contract address format.");
+                    return null;
+                }
+
+                try
+                {
+                    return new Wallet
+                    {
+                        Address = address,
+                        PrivateKey = privateKey,
+                        ContractAddress = contractAddress,
+                        Service = new ERC20TokenService(privateKey, contractAddress)
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to initialize ERC-20 wallet: {ex.Message}");
+                    return null;
+                }
+            }
+
+            try
+            {
+                return new Wallet
+                {
+                    Address = address,
+                    PrivateKey = privateKey,
+                    Service = new EthereumService(privateKey)
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to initialize Ethereum wallet: {ex.Message}");
+                return null;
+            }
         }
 
         private static Wallet CreateBitcoinWallet()
@@ -193,7 +234,7 @@ namespace CryptoWallet
                                 Console.WriteLine($"Hash: {tx.Hash}");
                                 Console.WriteLine($"  From: {tx.From}");
                                 Console.WriteLine($"  To: {tx.To}");
-                                Console.WriteLine($"  Value: {tx.Value} ETH");
+                                Console.WriteLine($"  Value: {tx.Value} {wallet.Service.CurrencyName}");
                                 Console.WriteLine("---");
                             }
                         }
@@ -219,11 +260,12 @@ namespace CryptoWallet
                 {
                     Address = wallet.Address,
                     EncryptedPrivateKey = Encryptor.Encrypt(wallet.PrivateKey, password),
-                    CurrencyName = wallet.Service.CurrencyName
+                    CurrencyName = wallet.Service.CurrencyName,
+                    ContractAddress = wallet.ContractAddress
                 });
             }
 
-            string json = JsonSerializer.Serialize(walletData);
+            string json = JsonSerializer.Serialize(walletData, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(WalletFilePath, json);
             Console.WriteLine("Wallets saved successfully.");
         }
@@ -239,11 +281,26 @@ namespace CryptoWallet
                 foreach (var data in walletData)
                 {
                     string privateKey = Encryptor.Decrypt(data.EncryptedPrivateKey, password);
+                    ICryptoService service;
+                    if (data.CurrencyName == "Bitcoin")
+                    {
+                        service = new BitcoinService();
+                    }
+                    else if (data.ContractAddress != null)
+                    {
+                        service = new ERC20TokenService(privateKey, data.ContractAddress);
+                    }
+                    else
+                    {
+                        service = new EthereumService(privateKey);
+                    }
+
                     wallets.Add(new Wallet
                     {
                         Address = data.Address,
                         PrivateKey = privateKey,
-                        Service = data.CurrencyName == "Ethereum" ? new EthereumService(privateKey) : new BitcoinService()
+                        ContractAddress = data.ContractAddress,
+                        Service = service
                     });
                 }
 
@@ -262,5 +319,6 @@ namespace CryptoWallet
         public string Address { get; set; }
         public string EncryptedPrivateKey { get; set; }
         public string CurrencyName { get; set; }
+        public string ContractAddress { get; set; }
     }
 }
