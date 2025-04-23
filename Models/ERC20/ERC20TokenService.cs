@@ -41,15 +41,13 @@ namespace CryptoWallet.Models.ERC20
                 _privateKey = privateKey;
                 _contractAddress = contractAddress;
                 Console.WriteLine($"Initializing ERC20TokenService with private key: {privateKey.Substring(0, 4)}... and contract: {_contractAddress}");
-
-                // Чтение конфигурации
+                
                 if (!File.Exists("appsettings.json"))
                     throw new FileNotFoundException("appsettings.json not found");
                 var config = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText("appsettings.json"));
                 _rpcUrl = config["InfuraApiKey"] ?? throw new ArgumentException("InfuraApiKey is missing in appsettings.json");
                 _etherscanApiKey = config["EtherscanApiKey"] ?? throw new ArgumentException("EtherscanApiKey is missing in appsettings.json");
 
-                // Инициализация Web3
                 var httpClientHandler = new HttpClientHandler();
                 var loggingHandler = new LoggingHttpMessageHandler(httpClientHandler);
                 var httpClient = new HttpClient(loggingHandler);
@@ -57,16 +55,13 @@ namespace CryptoWallet.Models.ERC20
                 var account = new Account(_privateKey);
                 _web3 = new Web3(account, client);
 
-                // Инициализация контракта
                 _contract = _web3.Eth.GetContract(_erc20Abi, _contractAddress);
 
-                // Получение decimals и symbol
                 var decimalsFunction = _contract.GetFunction("decimals");
                 _decimals = decimalsFunction.CallAsync<int>().GetAwaiter().GetResult();
                 var symbolFunction = _contract.GetFunction("symbol");
                 CurrencyName = symbolFunction.CallAsync<string>().GetAwaiter().GetResult();
 
-                // Инициализация Etherscan
                 _httpClient = new HttpClient(new LoggingHttpMessageHandler(new HttpClientHandler()));
                 _httpClient.BaseAddress = new Uri("https://api-sepolia.etherscan.io/");
 
@@ -129,15 +124,13 @@ namespace CryptoWallet.Models.ERC20
                 if (!toAddress.StartsWith("0x") || toAddress.Length != 42)
                     throw new ArgumentException("Invalid recipient address");
 
-                // Проверка баланса токенов
                 var balance = await GetBalanceAsync(_web3.TransactionManager.Account.Address);
                 if (balance < amount)
                     throw new InvalidOperationException("Insufficient token balance");
 
-                // Проверка баланса ETH для газа
                 var ethBalance = await _web3.Eth.GetBalance.SendRequestAsync(_web3.TransactionManager.Account.Address);
                 var ethBalanceInEth = Web3.Convert.FromWei(ethBalance.Value);
-                if (ethBalanceInEth < 0.001m) // Примерная плата за газ
+                if (ethBalanceInEth < 0.001m) 
                     throw new InvalidOperationException("Insufficient ETH for gas");
 
                 Console.WriteLine($"Sending {amount} {CurrencyName} to {toAddress}");
