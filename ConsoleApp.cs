@@ -2,30 +2,56 @@ using CryptoWallet.Models;
 using CryptoWallet.Models.Common;
 using CryptoWallet.Models.Ethereum;
 using CryptoWallet.Models.Bitcoin;
+using CryptoWallet.Models.ERC20;
+using NBitcoin;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Text.Json;
 using System.IO;
-using CryptoWallet.Models.ERC20;
-using Org.BouncyCastle.Bcpg;
 
 namespace CryptoWallet
 {
     public class ConsoleApp
     {
         private const string WalletFilePath = "wallets.json";
+        private static string _currentUserId;
+        private static string _seedPhrase;
 
         public static async Task Main(string[] args)
         {
+            DatabaseService.InitializeDatabase();
+
+            Console.WriteLine("Multi-Currency Crypto Wallet");
+            Console.WriteLine("1. Register");
+            Console.WriteLine("2. Login");
+            Console.WriteLine("3. Recover Wallet");
+            Console.Write("Select an option: ");
+            string initialChoice = Console.ReadLine();
+
+            if (initialChoice == "1")
+            {
+                RegisterUser();
+            }
+            else if (initialChoice == "2")
+            {
+                if (!LoginUser()) return;
+            }
+            else if (initialChoice == "3")
+            {
+                RecoverWallet();
+                return;
+            }
+            else
+            {
+                Console.WriteLine("Invalid option. Exiting...");
+                return;
+            }
+
             List<Wallet> wallets;
-
-            Console.Write("Enter password to unlock saved wallets: ");
-            string password = Console.ReadLine();
-
             if (File.Exists(WalletFilePath))
             {
-                wallets = LoadWallets(password);
+                wallets = LoadWallets(_seedPhrase);
                 if (wallets == null)
                 {
                     Console.WriteLine("Failed to unlock wallets. Exiting...");
@@ -59,7 +85,7 @@ namespace CryptoWallet
                         await SelectWallet(wallets);
                         break;
                     case "3":
-                        SaveWallets(wallets, password);
+                        SaveWallets(wallets, _seedPhrase);
                         running = false;
                         break;
                     default:
@@ -69,12 +95,70 @@ namespace CryptoWallet
             }
         }
 
+        private static void RegisterUser()
+        {
+            Console.Write("Enter User ID (e.g., user123): ");
+            _currentUserId = Console.ReadLine();
+            if (string.IsNullOrEmpty(_currentUserId))
+            {
+                Console.WriteLine("Error: User ID cannot be empty.");
+                return;
+            }
+
+            Mnemonic mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve);
+            _seedPhrase = mnemonic.ToString();
+            DatabaseService.SaveUser(_currentUserId, _seedPhrase);
+
+            Console.WriteLine($"Your seed phrase: {_seedPhrase}");
+            Console.WriteLine("Save it in a secure place! Do not share it with anyone.");
+        }
+
+        private static bool LoginUser()
+        {
+            Console.Write("Enter User ID: ");
+            _currentUserId = Console.ReadLine();
+            Console.Write("Enter your seed phrase: ");
+            _seedPhrase = Console.ReadLine();
+
+            if (DatabaseService.VerifyUser(_currentUserId, _seedPhrase))
+            {
+                Console.WriteLine("Login successful!");
+                return true;
+            }
+            else
+            {
+                Console.WriteLine("Invalid User ID or Seed Phrase.");
+                return false;
+            }
+        }
+
+        private static void RecoverWallet()
+        {
+            Console.Write("Enter your seed phrase to recover wallet: ");
+            string seedPhrase = Console.ReadLine();
+
+            try
+            {
+                Mnemonic mnemonic = new Mnemonic(seedPhrase);
+                ExtKey masterKey = mnemonic.DeriveExtKey();
+                Console.WriteLine("Seed phrase is valid. Wallet recovered.");
+
+                Wallet wallet = new Wallet(masterKey.PrivateKey);
+                Console.WriteLine($"Recovered wallet address: {wallet.Address}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error recovering wallet: {ex.Message}");
+            }
+        }
+
         private static void AddWallet(List<Wallet> wallets)
         {
             Console.WriteLine("\nAdd a new wallet:");
             Console.WriteLine("1. Add Ethereum Wallet");
             Console.WriteLine("2. Add ERC-20 Token Wallet");
             Console.WriteLine("3. Add Bitcoin Wallet");
+            Console.WriteLine("4. Generate Wallet from Seed Phrase");
             Console.Write("Select an option: ");
 
             var choice = Console.ReadLine();
@@ -90,9 +174,29 @@ namespace CryptoWallet
                 case "3":
                     wallets.Add(CreateBitcoinWallet());
                     break;
+                case "4":
+                    wallets.Add(CreateWalletFromSeedPhrase());
+                    break;
                 default:
                     Console.WriteLine("Invalid option.");
                     break;
+            }
+        }
+
+        private static Wallet CreateWalletFromSeedPhrase()
+        {
+            try
+            {
+                Mnemonic mnemonic = new Mnemonic(_seedPhrase);
+                ExtKey masterKey = mnemonic.DeriveExtKey();
+                Key privateKey = masterKey.PrivateKey;
+
+                return new Wallet(privateKey);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to generate wallet from seed phrase: {ex.Message}");
+                return null;
             }
         }
 
@@ -251,7 +355,7 @@ namespace CryptoWallet
             }
         }
 
-        private static void SaveWallets(List<Wallet> wallets, string password)
+        private static void SaveWallets(List<Wallet> wallets, string seedPhrase)
         {
             var walletData = new List<EncryptedWalletData>();
             foreach (var wallet in wallets)
@@ -259,7 +363,7 @@ namespace CryptoWallet
                 walletData.Add(new EncryptedWalletData
                 {
                     Address = wallet.Address,
-                    EncryptedPrivateKey = Encryptor.Encrypt(wallet.PrivateKey, password),
+                    EncryptedPrivateKey = Encryptor.Encrypt(wallet.PrivateKey, seedPhrase),
                     CurrencyName = wallet.Service.CurrencyName,
                     ContractAddress = wallet.ContractAddress
                 });
@@ -270,7 +374,7 @@ namespace CryptoWallet
             Console.WriteLine("Wallets saved successfully.");
         }
 
-        private static List<Wallet> LoadWallets(string password)
+        private static List<Wallet> LoadWallets(string seedPhrase)
         {
             try
             {
@@ -280,7 +384,7 @@ namespace CryptoWallet
 
                 foreach (var data in walletData)
                 {
-                    string privateKey = Encryptor.Decrypt(data.EncryptedPrivateKey, password);
+                    string privateKey = Encryptor.Decrypt(data.EncryptedPrivateKey, seedPhrase);
                     ICryptoService service;
                     if (data.CurrencyName == "Bitcoin")
                     {
