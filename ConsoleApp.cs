@@ -7,14 +7,12 @@ using NBitcoin;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using System.Text.Json;
-using System.IO;
+using NBitcoin.Crypto;
 
 namespace CryptoWallet
 {
     public class ConsoleApp
     {
-        private const string WalletFilePath = "wallets.json";
         private static string _currentUserId;
         private static string _seedPhrase;
 
@@ -48,21 +46,15 @@ namespace CryptoWallet
                 return;
             }
 
-            List<Wallet> wallets;
-            if (File.Exists(WalletFilePath))
+            List<Wallet> wallets = DatabaseService.LoadWallets(_currentUserId, _seedPhrase);
+            if (wallets == null)
             {
-                wallets = LoadWallets(_seedPhrase);
-                if (wallets == null)
-                {
-                    Console.WriteLine("Failed to unlock wallets. Exiting...");
-                    return;
-                }
-                Console.WriteLine("Wallets loaded successfully.");
+                Console.WriteLine("Failed to load wallets. Starting with an empty wallet list...");
+                wallets = new List<Wallet>();
             }
             else
             {
-                wallets = new List<Wallet>();
-                Console.WriteLine("No wallet file found. Starting with an empty wallet list.");
+                Console.WriteLine("Wallets loaded successfully.");
             }
 
             bool running = true;
@@ -71,7 +63,7 @@ namespace CryptoWallet
                 Console.WriteLine("\nMulti-Currency Crypto Wallet");
                 Console.WriteLine("1. Add Wallet");
                 Console.WriteLine("2. Select Wallet");
-                Console.WriteLine("3. Save and Exit");
+                Console.WriteLine("3. Exit");
                 Console.Write("Select an option: ");
 
                 var choice = Console.ReadLine();
@@ -85,7 +77,10 @@ namespace CryptoWallet
                         await SelectWallet(wallets);
                         break;
                     case "3":
-                        SaveWallets(wallets, _seedPhrase);
+                        foreach (var wallet in wallets)
+                        {
+                            DatabaseService.SaveWallet(_currentUserId, wallet, _seedPhrase);
+                        }
                         running = false;
                         break;
                     default:
@@ -141,10 +136,46 @@ namespace CryptoWallet
             {
                 Mnemonic mnemonic = new Mnemonic(seedPhrase);
                 ExtKey masterKey = mnemonic.DeriveExtKey();
-                Console.WriteLine("Seed phrase is valid. Wallet recovered.");
+                Console.WriteLine("Seed phrase is valid.");
 
-                Wallet wallet = new Wallet(masterKey.PrivateKey);
-                Console.WriteLine($"Recovered wallet address: {wallet.Address}");
+                Console.WriteLine("Select wallet type to recover:");
+                Console.WriteLine("1. Ethereum Wallet");
+                Console.WriteLine("2. Bitcoin Wallet");
+                Console.WriteLine("3. ERC-20 Token Wallet");
+                Console.Write("Select an option: ");
+                string choice = Console.ReadLine();
+
+                Wallet wallet = null;
+                if (choice == "1")
+                {
+                    wallet = CreateWalletFromSeedPhrase("Ethereum", null);
+                }
+                else if (choice == "2")
+                {
+                    wallet = CreateWalletFromSeedPhrase("Bitcoin", null);
+                }
+                else if (choice == "3")
+                {
+                    Console.Write("Enter ERC-20 token contract address (e.g., 0x...): ");
+                    var contractAddress = Console.ReadLine();
+                    if (!contractAddress.StartsWith("0x") || contractAddress.Length != 42)
+                    {
+                        Console.WriteLine("Invalid contract address format.");
+                        return;
+                    }
+                    wallet = CreateWalletFromSeedPhrase("ERC20", contractAddress);
+                }
+                else
+                {
+                    Console.WriteLine("Invalid option.");
+                    return;
+                }
+
+                if (wallet != null)
+                {
+                    Console.WriteLine("Wallet recovered successfully.");
+                    Console.WriteLine($"Recovered wallet address: {wallet.Address}");
+                }
             }
             catch (Exception ex)
             {
@@ -163,27 +194,64 @@ namespace CryptoWallet
 
             var choice = Console.ReadLine();
 
+            Wallet newWallet = null;
             switch (choice)
             {
                 case "1":
-                    wallets.Add(CreateWallet("Ethereum"));
+                    newWallet = CreateWallet("Ethereum");
                     break;
                 case "2":
-                    wallets.Add(CreateWallet("ERC20"));
+                    newWallet = CreateWallet("ERC20");
                     break;
                 case "3":
-                    wallets.Add(CreateBitcoinWallet());
+                    newWallet = CreateBitcoinWallet();
                     break;
                 case "4":
-                    wallets.Add(CreateWalletFromSeedPhrase());
+                    Console.WriteLine("Select wallet type to generate:");
+                    Console.WriteLine("1. Ethereum Wallet");
+                    Console.WriteLine("2. Bitcoin Wallet");
+                    Console.WriteLine("3. ERC-20 Token Wallet");
+                    Console.Write("Select an option: ");
+                    string walletTypeChoice = Console.ReadLine();
+
+                    if (walletTypeChoice == "1")
+                    {
+                        newWallet = CreateWalletFromSeedPhrase("Ethereum", null);
+                    }
+                    else if (walletTypeChoice == "2")
+                    {
+                        newWallet = CreateWalletFromSeedPhrase("Bitcoin", null);
+                    }
+                    else if (walletTypeChoice == "3")
+                    {
+                        Console.Write("Enter ERC-20 token contract address (e.g., 0x...): ");
+                        var contractAddress = Console.ReadLine();
+                        if (!contractAddress.StartsWith("0x") || contractAddress.Length != 42)
+                        {
+                            Console.WriteLine("Invalid contract address format.");
+                            return;
+                        }
+                        newWallet = CreateWalletFromSeedPhrase("ERC20", contractAddress);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Invalid option.");
+                    }
                     break;
                 default:
                     Console.WriteLine("Invalid option.");
                     break;
             }
+
+            if (newWallet != null)
+            {
+                wallets.Add(newWallet);
+                DatabaseService.SaveWallet(_currentUserId, newWallet, _seedPhrase);
+                Console.WriteLine("Wallet added and saved successfully.");
+            }
         }
 
-        private static Wallet CreateWalletFromSeedPhrase()
+        private static Wallet CreateWalletFromSeedPhrase(string walletType, string contractAddress)
         {
             try
             {
@@ -191,7 +259,41 @@ namespace CryptoWallet
                 ExtKey masterKey = mnemonic.DeriveExtKey();
                 Key privateKey = masterKey.PrivateKey;
 
-                return new Wallet(privateKey);
+                Wallet wallet = new Wallet
+                {
+                    PrivateKey = privateKey.ToHex()
+                };
+
+                if (walletType == "Ethereum" || walletType == "ERC20")
+                {
+                    PubKey pubKey = privateKey.PubKey;
+                    byte[] pubKeyBytes = pubKey.ToBytes()[1..]; // Убираем префикс 0x04
+                    byte[] hash = Hashes.SHA256(pubKeyBytes);
+                    byte[] addressBytes = hash[^20..];
+                    wallet.Address = "0x" + BitConverter.ToString(addressBytes).Replace("-", "").ToLower();
+
+                    if (walletType == "Ethereum")
+                    {
+                        wallet.Service = new EthereumService(wallet.PrivateKey);
+                    }
+                    else if (walletType == "ERC20")
+                    {
+                        wallet.ContractAddress = contractAddress;
+                        wallet.Service = new ERC20TokenService(wallet.PrivateKey, contractAddress);
+                    }
+                }
+                else if (walletType == "Bitcoin")
+                {
+                    PubKey pubKey = privateKey.PubKey;
+                    wallet.Address = pubKey.GetAddress(ScriptPubKeyType.Legacy, Network.Main).ToString();
+                    wallet.Service = new BitcoinService();
+                }
+                else
+                {
+                    throw new Exception("Unsupported wallet type.");
+                }
+
+                return wallet;
             }
             catch (Exception ex)
             {
@@ -354,75 +456,5 @@ namespace CryptoWallet
                 }
             }
         }
-
-        private static void SaveWallets(List<Wallet> wallets, string seedPhrase)
-        {
-            var walletData = new List<EncryptedWalletData>();
-            foreach (var wallet in wallets)
-            {
-                walletData.Add(new EncryptedWalletData
-                {
-                    Address = wallet.Address,
-                    EncryptedPrivateKey = Encryptor.Encrypt(wallet.PrivateKey, seedPhrase),
-                    CurrencyName = wallet.Service.CurrencyName,
-                    ContractAddress = wallet.ContractAddress
-                });
-            }
-
-            string json = JsonSerializer.Serialize(walletData, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(WalletFilePath, json);
-            Console.WriteLine("Wallets saved successfully.");
-        }
-
-        private static List<Wallet> LoadWallets(string seedPhrase)
-        {
-            try
-            {
-                string json = File.ReadAllText(WalletFilePath);
-                var walletData = JsonSerializer.Deserialize<List<EncryptedWalletData>>(json);
-                var wallets = new List<Wallet>();
-
-                foreach (var data in walletData)
-                {
-                    string privateKey = Encryptor.Decrypt(data.EncryptedPrivateKey, seedPhrase);
-                    ICryptoService service;
-                    if (data.CurrencyName == "Bitcoin")
-                    {
-                        service = new BitcoinService();
-                    }
-                    else if (data.ContractAddress != null)
-                    {
-                        service = new ERC20TokenService(privateKey, data.ContractAddress);
-                    }
-                    else
-                    {
-                        service = new EthereumService(privateKey);
-                    }
-
-                    wallets.Add(new Wallet
-                    {
-                        Address = data.Address,
-                        PrivateKey = privateKey,
-                        ContractAddress = data.ContractAddress,
-                        Service = service
-                    });
-                }
-
-                return wallets;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading wallets: {ex.Message}");
-                return null;
-            }
-        }
-    }
-
-    public class EncryptedWalletData
-    {
-        public string Address { get; set; }
-        public string EncryptedPrivateKey { get; set; }
-        public string CurrencyName { get; set; }
-        public string ContractAddress { get; set; }
     }
 }
