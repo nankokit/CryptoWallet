@@ -31,3 +31,22 @@ cd CryptoWallet
   }
 ```
 4. Run the Application: `dotnet run`
+
+ ## Usage
+1. **Register**: Create a new user with a unique ID and receive a secure seed phrase.
+2. **Login**: Use your user ID and seed phrase to access your wallets.
+3. **Add Wallet**: Create Ethereum, Bitcoin, or ERC-20 token wallets.
+4. **Manage Wallets**: Check balances, send transactions, or view transaction history.
+5. **Recover Wallet**: Restore a wallet using a seed phrase.
+
+## Security Notes
+- Store your seed phrase securely and never share it.
+- The console displays sensitive data (e.g., seed phrases) during registration. Future versions will improve this.
+- Use strong passwords for encryption.
+
+## Project Structure
+- **CryptoWallet/Models/Common**: Core models (`Wallet`, `Transaction`, `Encryptor`) and interfaces (`ICryptoService`).
+- **CryptoWallet/Models/Ethereum**: Ethereum-specific services and logic.
+- **CryptoWallet/Models/ERC20**: ERC-20 token services.
+- **CryptoWallet/DatabaseService.cs**: SQLite database management.
+- **CryptoWallet/ConsoleApp.cs**: Console-based UI and application logic.
